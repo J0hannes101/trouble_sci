@@ -1,0 +1,10 @@
+[default]
+general.chip = "nRF52840_xxAA"
+probe.protocol = "Swd"
+rtt.enabled = true
+
+[monitor]
+general.chip = "nRF52840_xxAA"
+probe.protocol = "Swd"
+flashing.enabled = false
+rtt.enabled = true

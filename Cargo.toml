@@ -1,0 +1,58 @@
+[package]
+edition      = "2024"
+name         = "sci_test"
+rust-version = "1.88"
+version      = "0.1.0"
+
+[[bin]]
+name = "sci_test"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
+
+[dependencies]
+# Core / Utilities
+log = "0.4.27"
+critical-section = "1.2.0"
+static_cell      = "2.1.1"
+thiserror = { version = "2.0.18", default-features = false }
+num_enum = { version = "0.7.5", default-features = false }
+rtt-target = "0.6.2"
+macros = { path = "./macros" }
+
+# Embassy (async runtime)
+embassy-nrf = { version = "0.9.0", features = ["nrf52840", "time-driver-rtc1"] }
+embassy-executor = { version = "0.9.0", features = ["log", "arch-cortex-m", "executor-thread"] }
+embassy-time     = { version = "0.5.0", features = ["log"] }
+embassy-sync     = "0.7.2"
+embassy-futures  = "0.1.2"
+linked_list_allocator = "0.10.5"
+cortex-m-rt = "0.7.0"
+
+# BLE
+bt-hci = { git = "https://github.com/embassy-rs/bt-hci", default-features = false }
+trouble-host = { git = "https://github.com/J0hannes101/trouble", branch = "sci", features = ["gatt"] }
+nrf-sdc = { git = "https://github.com/J0hannes101/nrf-sdc", branch = "sci", features = ["nrf52840", "peripheral", "central"] }
+nrf-mpsl = { git = "https://github.com/J0hannes101/nrf-sdc", branch = "sci", features = ["nrf52840", "critical-section-impl"] }
+
+[patch.crates-io]
+bt-hci = { git = "https://github.com/embassy-rs/bt-hci" }
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units    = 1
+debug            = 2
+debug-assertions = false
+incremental      = false
+lto              = 'fat'
+opt-level        = 's'
+overflow-checks  = false
+
+[features]
+#default = ["central"]      
+#default = ["peripheral"]
+peripheral = []
+central = []           

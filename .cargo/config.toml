@@ -1,0 +1,16 @@
+[target.thumbv7em-none-eabi]
+runner = "probe-rs run --chip=nRF52840_xxAA --preverify --no-location --catch-hardfault"
+
+[env]
+
+[build]
+rustflags = [
+  # Required to obtain backtraces (e.g. when using the "esp-backtrace" crate.)
+  # NOTE: May negatively impact performance of produced code
+  "-C", "force-frame-pointers",
+]
+
+target = "thumbv7em-none-eabi"
+
+[unstable]
+build-std = ["alloc", "core"]
