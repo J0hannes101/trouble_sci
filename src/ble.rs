@@ -227,7 +227,7 @@ where
                             Err(e) => warn!("Failed to read supported features: {:?}", e),
                         }
 
-                        let connection_params = ConnectParams {
+                        let connection_params = RequestedConnParams {
                             min_connection_interval: Duration::from_micros(7500),
                             max_connection_interval: Duration::from_micros(7500),
                             max_latency: 0,
@@ -283,12 +283,12 @@ where
                             min_connection_interval: Duration::from_micros(750),
                             max_connection_interval: Duration::from_micros(4000),
                             subrate_min: 1,
-                            subrate_max: 1,
-                            max_latency: 0,
-                            continuation_number: 0,
+                            subrate_max: 1000,
+                            max_latency: 1,
+                            continuation_number: 1,
                             supervision_timeout: Duration::from_secs(2),
-                            min_ce_length: Duration::from_micros(750),
-                            max_ce_length: Duration::from_micros(4000),
+                            min_ce_length: Duration::from_micros(1),
+                            max_ce_length: Duration::from_micros(7500),
                         };
 
                         match central

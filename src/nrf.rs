@@ -43,8 +43,6 @@ fn build_sdc<'d, const N: usize>(
             .support_connection_subrating_peripheral()
             .support_frame_space_update_peripheral()
             .support_shorter_connection_intervals_peripheral();
-        let support_helper = unsafe { nrf_sdc::raw::sdc_support_helper(core::prelude::v1::Some(nrf_sdc::raw::sdc_support_connection_subrating_peripheral))};
-        log::info!("support_helper: {}", support_helper);
     }
 
     #[cfg(feature = "central")]
@@ -55,8 +53,6 @@ fn build_sdc<'d, const N: usize>(
             .support_connection_subrating_central()
             .support_frame_space_update_central()
             .support_shorter_connection_intervals_central();
-        let support_helper = unsafe { nrf_sdc::raw::sdc_support_helper(core::prelude::v1::Some(nrf_sdc::raw::sdc_support_connection_subrating_central))};
-        log::info!("support_helper: {}", support_helper);
     }
 
 
