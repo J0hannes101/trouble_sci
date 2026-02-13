@@ -1112,7 +1112,7 @@ dependencies = [
 [[package]]
 name = "trouble-host"
 version = "0.6.0"
-source = "git+https://github.com/J0hannes101/trouble?branch=sci#4653fd2ef9a0d0a1f21f2d5f9ddd067bbc1e25e6"
+source = "git+https://github.com/embassy-rs/trouble#6f9f143a36c4d1d3680473ea9c5eccd83e792689"
 dependencies = [
  "bt-hci",
  "embassy-futures",
@@ -1130,7 +1130,7 @@ dependencies = [
 [[package]]
 name = "trouble-host-macros"
 version = "0.4.0"
-source = "git+https://github.com/J0hannes101/trouble?branch=sci#4653fd2ef9a0d0a1f21f2d5f9ddd067bbc1e25e6"
+source = "git+https://github.com/embassy-rs/trouble#6f9f143a36c4d1d3680473ea9c5eccd83e792689"
 dependencies = [
  "convert_case",
  "darling",

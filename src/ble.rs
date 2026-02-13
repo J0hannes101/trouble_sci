@@ -1,26 +1,28 @@
 #![allow(unused)]
 use bt_hci::{
+    AsHciBytes,
     cmd::{
         info::ReadLocalSupportedCmds,
         le::{
             LeConnectionRateRequest, LeFrameSpaceUpdate, LeReadLocalSupportedFeatures,
-            LeReadMinimumSupportedConnectionInterval, LeSetDefaultRateParameters, LeSetPhy,
+            LeReadMinimumSupportedConnectionInterval, LeSetDefaultRateParameters, LeSetHostFeature,
+            LeSetPhy,
         },
     },
     controller::{ControllerCmdAsync, ControllerCmdSync},
 };
+
+#[cfg(feature = "peripheral")]
+use crate::gatt::CounterServer;
 use embassy_futures::{
     join::join,
     select::{Either, select},
 };
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use log::{info, warn};
 use static_cell::StaticCell;
-use trouble_host::prelude::*;
 use trouble_host::gatt::GattConnectionEvent;
-
-#[cfg(feature = "peripheral")]
-use crate::gatt::CounterServer;
+use trouble_host::prelude::*;
 
 const ADVERTISE_NAME: &str = "BLE-SCI-TEST";
 
@@ -44,6 +46,20 @@ const CHAR_CMD_UUID: Uuid = Uuid::Uuid128([
 ]);
 
 const PERIPHERAL_ADDR_BYTES: [u8; 6] = [0xff, 0x1f, 0x1f, 0x1f, 0x1f, 0xc0];
+
+/// Connection rate parameters for both central and peripheral
+/// Uses 875 µs connection interval (7 × 125 µs) for low latency
+const CONN_RATE_PARAMS: ConnectRateParams = ConnectRateParams {
+    min_connection_interval: Duration::from_micros(2000),    // 16 × 125 µs
+    max_connection_interval: Duration::from_micros(2000),    // 16 × 125 µs
+    subrate_min: 1,
+    subrate_max: 1,
+    max_latency: 0,
+    continuation_number: 0,
+    supervision_timeout: Duration::from_millis(500),
+    min_ce_length: Duration::from_micros(500),
+    max_ce_length: Duration::from_micros(500),
+};
 const CENTRAL_ADDR_BYTES: [u8; 6] = [0xaa, 0x2f, 0x2f, 0x2f, 0x2f, 0xc0];
 
 static RESOURCES: StaticCell<
@@ -56,6 +72,29 @@ static SERVER: StaticCell<CounterServer<'static>> = StaticCell::new();
 #[cfg(all(feature = "peripheral", feature = "central"))]
 compile_error!("enable only one of the features: `peripheral` or `central`");
 
+/// Set host feature bits for Connection Subrating and Shorter Connection Intervals
+async fn set_host_features<C, P>(stack: &Stack<'_, C, P>)
+where
+    C: Controller + ControllerCmdSync<LeSetHostFeature>,
+    P: trouble_host::PacketPool,
+{
+    const LE_FEAT_BIT_SHORTER_CONN_INTERVALS_HOST_SUPP: u8 = 73;
+
+    match stack
+        .command(LeSetHostFeature::new(
+            LE_FEAT_BIT_SHORTER_CONN_INTERVALS_HOST_SUPP,
+            1,
+        ))
+        .await
+    {
+        Ok(_) => info!("Shorter Connection Intervals host feature enabled"),
+        Err(e) => warn!(
+            "Failed to set Shorter Connection Intervals host feature: {:?}",
+            e
+        ),
+    }
+}
+
 pub async fn run<C>(controller: C)
 where
     C: Controller
@@ -65,8 +104,11 @@ where
         + ControllerCmdSync<ReadLocalSupportedCmds>
         + ControllerCmdAsync<LeSetPhy>
         + ControllerCmdSync<LeFrameSpaceUpdate>
-        + ControllerCmdSync<LeSetDefaultRateParameters>,
+        + ControllerCmdSync<LeSetDefaultRateParameters>
+        + ControllerCmdSync<LeSetHostFeature>,
 {
+    let address = Address::random([0, 0, 0, 0, 0, 0]);
+
     #[cfg(feature = "peripheral")]
     let address = Address::random(PERIPHERAL_ADDR_BYTES);
 
@@ -95,26 +137,29 @@ where
         );
 
         join(runner.run(), async {
+            // Enable host features for Connection Subrating and Shorter Connection Intervals
+            set_host_features(&stack).await;
+
+            let mut adv_data = [0; 31];
+            let mut scan_data = [0; 31];
+
+            let len_adv = AdStructure::encode_slice(
+                &[
+                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                    AdStructure::ServiceUuids128(&[SERVICE_UUID_BYTES]),
+                ],
+                &mut adv_data,
+            )
+            .unwrap();
+
+            let len_scan = AdStructure::encode_slice(
+                &[AdStructure::CompleteLocalName(ADVERTISE_NAME.as_bytes())],
+                &mut scan_data,
+            )
+            .unwrap();
+
             loop {
                 info!("Advertising...");
-
-                let mut adv_data = [0; 31];
-                let mut scan_data = [0; 31];
-
-                let len_adv = AdStructure::encode_slice(
-                    &[
-                        AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                        AdStructure::ServiceUuids128(&[SERVICE_UUID_BYTES]),
-                    ],
-                    &mut adv_data,
-                )
-                .unwrap();
-
-                let len_scan = AdStructure::encode_slice(
-                    &[AdStructure::CompleteLocalName(ADVERTISE_NAME.as_bytes())],
-                    &mut scan_data,
-                )
-                .unwrap();
 
                 let advertiser = peripheral
                     .advertise(
@@ -127,66 +172,33 @@ where
                     .await
                     .unwrap();
 
-                let connection = advertiser.accept().await.unwrap();
-                info!("Central connected!");
+                let connection = match advertiser.accept().await {
+                    Ok(conn) => conn,
+                    Err(_) => continue,
+                };
 
                 let mut counter: u32 = 0;
                 let gatt_conn = connection.with_attribute_server(server).unwrap();
-                let mut last_tick: Option<Instant> = None;
 
                 loop {
                     let event = gatt_conn.next().await;
 
                     match event {
-                        GattConnectionEvent::ConnectionRateChanged { conn_interval, .. } => {
-                            log::info!("connection changed - rate: {}us", conn_interval.as_micros())
-                        }
-                        GattConnectionEvent::Disconnected { reason } => {
-                            info!("Disconnected (reason: {:?})", reason);
-                            break;
-                        }
+                        GattConnectionEvent::Disconnected { .. } => break,
                         GattConnectionEvent::Gatt { event } => {
-                            match event {
-                                GattEvent::Write { .. } => {
-                                    let now = Instant::now();
-
-                                    if let Some(prev) = last_tick {
-                                        let elapsed = now - prev;
-                                        if counter % 100 == 0 {
-                                            info!(
-                                                "Count: {} | Interval: {}ms",
-                                                counter,
-                                                elapsed.as_millis()
-                                            );
-                                        }
-                                    }
-                                    last_tick = Some(now);
-
-                                    // Update DB and notify
-                                    server
-                                        .counter_service
-                                        .counter
-                                        .set(&server, &counter)
-                                        .unwrap();
-                                    let _ = server
-                                        .counter_service
-                                        .counter
-                                        .notify(&gatt_conn, &counter)
-                                        .await;
-                                    counter = counter.wrapping_add(1);
-                                }
-                                _ => {}
+                            if let GattEvent::Write { .. } = event {
+                                server
+                                    .counter_service
+                                    .counter
+                                    .set(&server, &counter)
+                                    .unwrap();
+                                let _ = server
+                                    .counter_service
+                                    .counter
+                                    .notify(&gatt_conn, &counter)
+                                    .await;
+                                counter = counter.wrapping_add(1);
                             }
-                        }
-                        GattConnectionEvent::ConnectionParamsUpdated { conn_interval, .. } => {
-                            info!("Average Interval: {}ms", conn_interval.as_millis());
-                        }
-
-                        GattConnectionEvent::ConnectionRateChanged { conn_interval, .. } => {
-                            log::info!(
-                                "sci: connection_rate_changed: {}us",
-                                conn_interval.as_micros()
-                            );
                         }
                         _ => {}
                     }
@@ -214,6 +226,9 @@ where
         };
 
         join(runner.run(), async {
+            // Enable host features for Connection Subrating and Shorter Connection Intervals
+            set_host_features(&stack).await;
+
             loop {
                 info!("Connecting to {:?}...", target);
                 match central.connect(&config).await {
@@ -241,7 +256,10 @@ where
                             Err(e) => warn!("Failed to set PHY: {:?}", e),
                         }
 
-                        match conn.update_connection_params(&stack, &connection_params).await {
+                        match conn
+                            .update_connection_params(&stack, &connection_params)
+                            .await
+                        {
                             Ok(_) => info!("Connection parameters updated to 7.5ms"),
                             Err(e) => warn!("Failed to update connection parameters: {:?}", e),
                         }
@@ -250,7 +268,7 @@ where
                             .update_frame_space(
                                 &stack,
                                 Duration::from_micros(0),
-                                Duration::from_micros(1000),
+                                Duration::from_micros(125),
                                 PhyMask::new().set_le_2m_phy(true),
                                 SpacingTypes::new()
                                     .set_t_ifs_acl_cp(true)
@@ -279,32 +297,38 @@ where
                             ),
                         }
 
-                        let conn_rate_params = ConnectRateParams {
-                            min_connection_interval: Duration::from_micros(750),
-                            max_connection_interval: Duration::from_micros(4000),
-                            subrate_min: 1,
-                            subrate_max: 1000,
-                            max_latency: 1,
-                            continuation_number: 1,
-                            supervision_timeout: Duration::from_secs(2),
-                            min_ce_length: Duration::from_micros(1),
-                            max_ce_length: Duration::from_micros(7500),
-                        };
 
-                        match central
-                            .set_default_connection_rate_parameters(&conn_rate_params)
-                            .await
-                        {
-                            Ok(_) => info!("Default rate parameters set"),
-                            Err(e) => warn!("Failed to set default rate parameters: {:?}", e),
-                        }
+                        Timer::after(Duration::from_millis(500)).await;
+                        info!(
+                            "Requesting connection rate: interval={}us (N={}), subrate={}-{}, latency={}, cont={}, ce={}-{}us",
+                            CONN_RATE_PARAMS.min_connection_interval.as_micros(),
+                            CONN_RATE_PARAMS.min_connection_interval.as_micros() / 125,
+                            CONN_RATE_PARAMS.subrate_min,
+                            CONN_RATE_PARAMS.subrate_max,
+                            CONN_RATE_PARAMS.max_latency,
+                            CONN_RATE_PARAMS.continuation_number,
+                            CONN_RATE_PARAMS.min_ce_length.as_micros(),
+                            CONN_RATE_PARAMS.max_ce_length.as_micros()
+                        );
 
-                        match conn
-                            .request_connection_rate(&stack, &conn_rate_params)
-                            .await
-                        {
-                            Ok(_) => info!("Connection rate request sent"),
-                            Err(e) => warn!("Connection rate request failed: {:?}", e),
+                        const MAX_RETRIES: u32 = 10;
+                        for i in 0..MAX_RETRIES  {
+                            match conn
+                                .request_connection_rate(&stack, &CONN_RATE_PARAMS)
+                                .await
+                            {
+                                Ok(_) => {
+                                    info!("Connection rate request sent successfully");
+                                    break;
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Connection rate request failed (retry {}/{}): {:?}",
+                                        i, MAX_RETRIES, e
+                                    );
+                                    Timer::after(Duration::from_millis(200)).await;
+                                }
+                            }
                         }
 
                         let client = match GattClient::<_, DefaultPacketPool, 10>::new(
@@ -351,8 +375,24 @@ where
                                 warn!("Failed to send initial ping: {:?}", e);
                             }
 
+                            let mut counter: u32 = 0;
+                            let mut last_tick: Option<Instant> = None;
+
                             loop {
                                 let _ = listener.next().await;
+
+                                // Track timing like peripheral does
+                            let now = Instant::now();
+                            if let Some(prev) = last_tick {
+                                let elapsed = now - prev;
+                                if counter % 100 == 0 {
+                                    let ms = elapsed.as_micros() as f64 / 2000.0;
+                                    info!("Client Count: {} | Interval: {:.3}ms", counter, ms);
+                                }
+                            }
+                            last_tick = Some(now);
+                                counter = counter.wrapping_add(1);
+
                                 if let Err(e) =
                                     client.write_characteristic(&command_char, &[1u8]).await
                                 {

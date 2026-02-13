@@ -32,7 +32,7 @@ cortex-m-rt = "0.7.0"
 
 # BLE
 bt-hci = { version = "0.8", default-features = false }
-trouble-host = { git = "https://github.com/J0hannes101/trouble", branch = "sci", features = ["gatt"] }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", features = ["gatt"] }
 nrf-sdc = { git = "https://github.com/J0hannes101/nrf-sdc", branch = "sci", features = ["nrf52840", "peripheral", "central"] }
 nrf-mpsl = { git = "https://github.com/J0hannes101/nrf-sdc", branch = "sci", features = ["nrf52840", "critical-section-impl"] }
 
@@ -49,7 +49,7 @@ opt-level        = 's'
 overflow-checks  = false
 
 [features]
-default = ["central"]      
+#default = ["central"]      
 #default = ["peripheral"]
 peripheral = []
 central = []           

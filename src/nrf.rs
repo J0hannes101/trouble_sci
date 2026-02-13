@@ -1,8 +1,6 @@
 use embassy_nrf::{Peri, bind_interrupts, peripherals::*, rng};
 use macros::take_resources;
-use nrf_sdc::{
-    mpsl::{self, MultiprotocolServiceLayer},
-};
+use nrf_sdc::mpsl::{self, MultiprotocolServiceLayer};
 use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
@@ -54,7 +52,6 @@ fn build_sdc<'d, const N: usize>(
             .support_frame_space_update_central()
             .support_shorter_connection_intervals_central();
     }
-
 
     builder = builder.support_lowest_frame_space().buffer_cfg(
         DefaultPacketPool::MTU as u16,

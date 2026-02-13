@@ -1,6 +1,5 @@
 use trouble_host::prelude::*;
 
-
 #[gatt_server]
 pub struct CounterServer {
     pub counter_service: CounterService,

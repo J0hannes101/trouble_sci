@@ -2,6 +2,7 @@
 runner = "probe-rs run --chip=nRF52840_xxAA --preverify --no-location --catch-hardfault"
 
 [env]
+BINDGEN_EXTRA_CLANG_ARGS = "-I/nix/store/xibf2ayyaljj1r7wgjf4n7n4vg5z8n2v-clang-21.1.8-lib/lib/clang/21/include -D__STDC_HOSTED__=0"
 
 [build]
 rustflags = [
